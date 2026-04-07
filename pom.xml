@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.openprojectx.spark.hms.test</groupId>
+    <artifactId>spark-test</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <cdh.spark.version>3.3.2.3.3.7190.9-1</cdh.spark.version>
+        <cdh.hadoop.version>3.1.1.7.1.9.14-2</cdh.hadoop.version>
+        <iceberg.version>1.8.1</iceberg.version>
+        <junit.version>5.10.2</junit.version>
+        <testcontainers.version>2.0.4</testcontainers.version>
+        <cloudera.hms.version>0.1.9</cloudera.hms.version>
+        <awssdk.version>2.25.70</awssdk.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>cloudera</id>
+            <url>https://repository.cloudera.com/repository/cloudera-repos/</url>
+        </repository>
+        <repository>
+            <id>sonatype-snapshots</id>
+            <url>https://s01.oss.sonatype.org/content/repositories/snapshots/</url>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
+
+    <dependencies>
+
+        <!-- ===== Spark (CDH) ===== -->
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_2.12</artifactId>
+            <version>${cdh.spark.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_2.12</artifactId>
+            <version>${cdh.spark.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-hive_2.12</artifactId>
+            <version>${cdh.spark.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-aws</artifactId>
+            <version>${cdh.hadoop.version}</version>
+        </dependency>
+
+        <!-- ===== Iceberg ===== -->
+        <!-- All-in-one runtime fat JAR for Spark 3.3 (includes iceberg-aws module code) -->
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-spark-runtime-3.3_2.12</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <!-- AWS SDK v2 shaded bundle required by S3FileIO at runtime -->
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-aws-bundle</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+
+        <!-- ===== Test dependencies ===== -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers JUnit 5 extension -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- LocalStack (S3) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-localstack</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Cloudera HMS testcontainer (JDK 11 compatible module) -->
+        <dependency>
+            <groupId>org.openprojectx.cloudera.hms</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${cloudera.hms.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>2.17.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.scala-lang.modules</groupId>
+            <artifactId>scala-collection-compat_2.12</artifactId>
+            <version>2.7.0</version>
+        </dependency>
+
+        <!-- AWS SDK v2 (unshaded) for creating test S3 buckets in @BeforeAll -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${awssdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.12.1</version>
+                <configuration>
+                    <source>11</source>
+                    <target>11</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <!-- One fork per test class; do not reuse (Spark SparkContext is singleton per JVM) -->
+                    <forkCount>1</forkCount>
+                    <reuseForks>false</reuseForks>
+                    <argLine>
+                        --add-opens java.base/java.lang=ALL-UNNAMED
+                        --add-opens java.base/java.lang.invoke=ALL-UNNAMED
+                        --add-opens java.base/java.nio=ALL-UNNAMED
+                        --add-opens java.base/sun.nio.ch=ALL-UNNAMED
+                        --add-opens java.base/java.util=ALL-UNNAMED
+                        --add-opens java.base/java.util.concurrent=ALL-UNNAMED
+                        --add-opens java.base/java.io=ALL-UNNAMED
+                        --add-opens java.base/java.net=ALL-UNNAMED
+                        -Xmx2g -Xms512m
+                    </argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

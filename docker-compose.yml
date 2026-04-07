@@ -1,0 +1,126 @@
+version: "3.8"
+
+# Local development stack for Iceberg + HMS + S3
+#
+# Services:
+#   hms        – Cloudera Hive Metastore (embedded PostgreSQL, Thrift on :9083)
+#   localstack – AWS-compatible S3 on :4566
+#   s3-init    – one-shot container that creates the warehouse bucket
+#
+# Connect Spark to these services:
+#   spark.sql.catalog.hive_prod.uri             = thrift://localhost:9083
+#   spark.sql.catalog.hive_prod.warehouse       = s3://iceberg-warehouse/warehouse
+#   spark.sql.catalog.hive_prod.s3.endpoint     = http://localhost:4566
+#   spark.sql.catalog.hive_prod.s3.access-key-id     = test
+#   spark.sql.catalog.hive_prod.s3.secret-access-key = test
+#   spark.sql.catalog.hive_prod.s3.path-style-access  = true
+#   spark.sql.catalog.hive_prod.client.region   = us-east-1
+#
+# Usage:
+#   docker compose up -d          # start everything
+#   docker compose down -v        # stop and wipe volumes
+
+services:
+
+  # ── Hive Metastore Service ─────────────────────────────────────────────────
+  # Bundles its own PostgreSQL – no separate DB container needed.
+  # First startup initialises the Hive 3.1 schema automatically (~30-60 s).
+  hms:
+    image: ghcr.io/openprojectx/cloudera-hms:0.1.10-SNAPSHOT
+    container_name: cloudera-hms
+    ports:
+      - "9083:9083"      # Thrift API
+    environment:
+      # PostgreSQL (embedded)
+      POSTGRES_DB:       metastore_db
+      POSTGRES_USER:     hive
+      POSTGRES_PASSWORD: hive-password
+      # Metastore
+      HMS_WAREHOUSE_DIR:     /var/lib/cloudera-hms/warehouse
+      HMS_INITIALIZE_SCHEMA: "true"
+      HMS_LOG_LEVEL:         DEBUG
+      # Tell HMS where the Thrift server should bind
+      HMS_HOST: "0.0.0.0"
+      HMS_PORT: "9083"
+      HMS_CONF_FS_S3A_ENDPOINT : http://localstack:4566
+      HMS_CONF_FS_S3A_ENDPOINT_REGION : us-east-1
+      HMS_CONF_FS_S3A_PATH_STYLE_ACCESS : "true"
+      HMS_CONF_FS_S3A_CONNECTION.SSL_ENABLED : "false"
+      HMS_CONF_FS_S3A_ACCESS_KEY : test
+      HMS_CONF_FS_S3A_SECRET_KEY : test
+      HMS_CONF_FS_S3A_AWS_CREDENTIALS_PROVIDER : org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
+
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      NO_PROXY: "localhost,127.0.0.1,localstack"
+      no_proxy: "localhost,127.0.0.1,localstack"
+    healthcheck:
+      # Port 9083 open ⇒ Thrift server is accepting connections
+      test: ["CMD-SHELL", "nc -z localhost 9083 || exit 1"]
+      interval: 10s
+      timeout:  5s
+      retries:  15
+      start_period: 30s
+    volumes:
+      - hms-pgdata:/var/lib/postgresql          # PostgreSQL data files
+      - hms-warehouse:/var/lib/cloudera-hms     # local warehouse (HMS default)
+    restart: unless-stopped
+
+  # ── LocalStack (S3) ────────────────────────────────────────────────────────
+  localstack:
+    image: localstack/localstack:3.8.1
+    container_name: localstack
+    ports:
+      - "4566:4566"      # unified gateway
+    environment:
+      SERVICES:           s3          # start only the S3 service (faster)
+      DEFAULT_REGION:     us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      PERSISTENCE:        1           # survive container restarts
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout:  3s
+      retries:  20
+      start_period: 10s
+    volumes:
+      - localstack-data:/var/lib/localstack
+    restart: unless-stopped
+
+  # ── S3 bucket initialisation (one-shot) ────────────────────────────────────
+  # Creates the warehouse bucket the first time the stack starts.
+  # Idempotent: the `|| true` at the end means re-runs are harmless.
+  s3-init:
+    image: amazon/aws-cli:latest
+    container_name: s3-init
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID:     test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION:    us-east-1
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      NO_PROXY: ""
+      no_proxy: ""
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        echo "Creating S3 buckets..."
+        aws --endpoint-url http://localstack:4566 \
+            s3 mb s3://iceberg-warehouse \
+            --region us-east-1 || true
+        echo "Done. Bucket: s3://iceberg-warehouse"
+        aws --endpoint-url http://localstack:4566 s3 ls
+    restart: "no"
+
+volumes:
+  hms-pgdata:       # PostgreSQL data directory (survives restarts)
+  hms-warehouse:    # local Hive warehouse (HMS default path)
+  localstack-data:  # LocalStack state (buckets, objects)
