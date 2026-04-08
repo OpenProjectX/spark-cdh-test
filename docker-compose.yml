@@ -26,7 +26,7 @@ services:
   # Bundles its own PostgreSQL – no separate DB container needed.
   # First startup initialises the Hive 3.1 schema automatically (~30-60 s).
   hms:
-    image: ghcr.io/openprojectx/cloudera-hms:0.1.10-SNAPSHOT
+    image: ghcr.io/openprojectx/cloudera-hms:0.1.10
     container_name: cloudera-hms
     ports:
       - "9083:9083"      # Thrift API
